@@ -7,9 +7,11 @@ Builds a Windows installer that:
   set to **start automatically on boot** - before any user logs in.
 - Runs the agent in `--headless` mode (no window), since Windows services
   run in a non-interactive session and cannot show a GUI/tray icon.
-- Adds a **"Configure Printers"** Start Menu shortcut that opens the
-  normal configuration window (Local/Network Printers, default printer)
-  and restarts the service afterwards so the change takes effect.
+- Adds a **desktop icon** (and a matching "Configure Printers" Start Menu
+  shortcut) that opens the normal configuration window (Local/Network
+  Printers, default printer) and restarts the service afterwards so the
+  change takes effect. Without this, there would be no way to reach that
+  window at all - the service itself has no window (see below).
 
 Two variants are produced: `DotMatrixPrintAgentSetup-x86.exe` (32-bit
 Windows) and `DotMatrixPrintAgentSetup-x64.exe` (64-bit Windows, the
@@ -44,7 +46,8 @@ hot-reload the file while running. So "Configure Printers":
 3. starts the service again, now with the printer you just picked.
 
 You do not need to remember to do this yourself - it is exactly what the
-Start Menu shortcut runs (`scripts\configure-printers.ps1`).
+desktop icon and Start Menu shortcut both run
+(`scripts\configure-printers.ps1`).
 
 ## Code changes that made this possible
 
@@ -123,8 +126,10 @@ downloaded JRE/WinSW files are cached (by SHA-256) under `.cache\`.
 2. Runs `scripts\install-service.ps1`, which registers the Windows
    service (`sc.exe`-level, via WinSW) with **Startup type: Automatic**
    and starts it immediately.
-3. Adds Start Menu shortcuts: **Configure Printers**, **Restart
-   Service**, **View Service Logs**, **Uninstall**.
+3. Adds a **Dot Matrix Print Agent** desktop icon (opens the same
+   configuration window as "Configure Printers" below), and Start Menu
+   shortcuts: **Configure Printers**, **Restart Service**, **View
+   Service Logs**, **Uninstall**.
 
 Uninstalling (Control Panel &rarr; Apps, or the Start Menu shortcut) stops
 and unregisters the service before removing files. It does **not** delete
@@ -133,7 +138,8 @@ survives an uninstall/reinstall/upgrade).
 
 ## After installing
 
-1. Open **Configure Printers** from the Start Menu.
+1. Open the **Dot Matrix Print Agent** icon on the desktop (or
+   **Configure Printers** from the Start Menu - same thing).
 2. Add your network printer (or pick a local one) and **Set as Default**
    - Odoo's print button never asks which printer to use, so this step
      is required.

@@ -59,6 +59,10 @@ Name: "{commonappdata}\DotMatrixPrintAgent"; Permissions: users-modify
 Name: "{group}\Configure Printers"; Filename: "powershell.exe"; \
     Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\configure-printers.ps1"""; \
     WorkingDir: "{app}"; IconFilename: "{app}\jre\bin\javaw.exe"
+Name: "{autodesktop}\{#AppName}"; Filename: "powershell.exe"; \
+    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\configure-printers.ps1"""; \
+    WorkingDir: "{app}"; IconFilename: "{app}\jre\bin\javaw.exe"; \
+    Comment: "Pick the default printer for the Dot Matrix Print Agent"
 Name: "{group}\Restart Service"; Filename: "powershell.exe"; \
     Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\restart-service.ps1"""; \
     WorkingDir: "{app}"
