@@ -3,7 +3,7 @@
 
     <groupId>com.dotmatrix</groupId>
     <artifactId>dotmatrix-print-agent</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -23,6 +23,7 @@
                     <archive>
                         <manifest>
                             <mainClass>com.dotmatrix.agent.Main</mainClass>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
                         </manifest>
                     </archive>
                 </configuration>

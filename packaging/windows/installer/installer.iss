@@ -77,3 +77,24 @@ Filename: "powershell.exe"; \
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
+
+[Code]
+// Runs after the user confirms install but before [Files] copies anything.
+// On a fresh install there is nothing here yet; on an update over an
+// existing install, the old service is still running and holds the old
+// jar/JRE files open - without stopping it first, the Files step below
+// would fail with a sharing violation. [Run]'s install-service.ps1
+// re-registers and starts the (possibly updated) service afterwards.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ServiceExe: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+  ServiceExe := ExpandConstant('{app}\DotMatrixPrintAgentService.exe');
+  if FileExists(ServiceExe) then
+  begin
+    Exec(ServiceExe, 'stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ServiceExe, 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;

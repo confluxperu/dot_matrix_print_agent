@@ -1,5 +1,6 @@
 package com.dotmatrix.agent.ui;
 
+import com.dotmatrix.agent.Logger;
 import com.dotmatrix.agent.config.AppConfig;
 import com.dotmatrix.agent.config.ConfigStore;
 import com.dotmatrix.agent.model.NetworkPrinter;
@@ -7,6 +8,9 @@ import com.dotmatrix.agent.print.PrintAgentException;
 import com.dotmatrix.agent.print.PrintManager;
 import com.dotmatrix.agent.print.PrinterInfo;
 import com.dotmatrix.agent.server.HttpApiServer;
+import com.dotmatrix.agent.update.UpdateChecker;
+import com.dotmatrix.agent.update.UpdateInfo;
+import com.dotmatrix.agent.update.UpdateInstaller;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -42,6 +46,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -76,6 +81,11 @@ public class MainFrame extends JFrame {
     private final JLabel defaultPrinterLabel = new JLabel();
     private final JSpinner portSpinner;
     private final JCheckBox bindAllCheckbox;
+
+    private final JPanel updateBanner = new JPanel(new BorderLayout(8, 0));
+    private final JLabel updateLabel = new JLabel();
+    private final JButton updateButton = new JButton("Update Now");
+    private UpdateInfo pendingUpdate;
 
     private TrayManager trayManager;
 
@@ -118,8 +128,14 @@ public class MainFrame extends JFrame {
         logScroll.setBorder(BorderFactory.createTitledBorder("Activity Log"));
         logScroll.setPreferredSize(new Dimension(820, 160));
 
+        buildUpdateBanner();
+        JPanel northContainer = new JPanel();
+        northContainer.setLayout(new BoxLayout(northContainer, BoxLayout.Y_AXIS));
+        northContainer.add(updateBanner);
+        northContainer.add(topBar);
+
         setLayout(new BorderLayout());
-        add(topBar, BorderLayout.NORTH);
+        add(northContainer, BorderLayout.NORTH);
         add(tabs, BorderLayout.CENTER);
         add(logScroll, BorderLayout.SOUTH);
 
@@ -142,6 +158,8 @@ public class MainFrame extends JFrame {
         updateServerStatus();
         updateDefaultPrinterLabel();
         log("Dot Matrix Print Agent started.");
+
+        checkForUpdatesInBackground();
     }
 
     private JPanel buildLocalPanel() {
@@ -527,6 +545,120 @@ public class MainFrame extends JFrame {
         serverStatusLabel.setText(server.isRunning()
                 ? "Server RUNNING on port " + config.getServerPort()
                 : "Server STOPPED");
+    }
+
+    private void buildUpdateBanner() {
+        updateBanner.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        updateBanner.setBackground(new Color(0xFF, 0xF3, 0xCD));
+        updateBanner.setOpaque(true);
+        updateLabel.setFont(updateLabel.getFont().deriveFont(Font.BOLD));
+        updateBanner.add(updateLabel, BorderLayout.CENTER);
+        updateButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                performUpdate();
+            }
+        });
+        updateBanner.add(updateButton, BorderLayout.EAST);
+        updateBanner.setVisible(false);
+    }
+
+    /**
+     * Runs once on startup, in the background so it never delays showing
+     * the window. Queries the project's public GitHub Releases feed (see
+     * {@link UpdateChecker}) - silently does nothing if unreachable, not
+     * newer, or if this build has no packaged version (dev/classpath run).
+     */
+    private void checkForUpdatesInBackground() {
+        final String currentVersion = getClass().getPackage().getImplementationVersion();
+        Thread checkThread = new Thread("update-check") {
+            @Override
+            public void run() {
+                UpdateInfo info = new UpdateChecker().checkForUpdate(currentVersion, backgroundLogger());
+                if (info.isAvailable()) {
+                    final UpdateInfo finalInfo = info;
+                    SwingUtilities.invokeLater(new Runnable() {
+                        @Override
+                        public void run() {
+                            showUpdateBanner(finalInfo);
+                        }
+                    });
+                }
+            }
+        };
+        checkThread.setDaemon(true);
+        checkThread.start();
+    }
+
+    private Logger backgroundLogger() {
+        return new Logger() {
+            @Override
+            public void log(String message) {
+                MainFrame.this.log(message);
+            }
+        };
+    }
+
+    private void showUpdateBanner(UpdateInfo info) {
+        pendingUpdate = info;
+        updateLabel.setText("A new version is available: v" + info.getLatestVersion());
+        updateButton.setEnabled(true);
+        updateButton.setText("Update Now");
+        updateBanner.setVisible(true);
+        log("Update available: v" + info.getLatestVersion() + ". Click 'Update Now' above to install it.");
+    }
+
+    /**
+     * Downloads the installer matching this JVM's architecture and
+     * launches it elevated and silent (one Windows security prompt), then
+     * closes this application so Setup can freely replace the jar/JRE
+     * files. The installer stops and restarts the background service on
+     * its own.
+     */
+    private void performUpdate() {
+        if (pendingUpdate == null) {
+            return;
+        }
+        final UpdateInfo info = pendingUpdate;
+        updateButton.setEnabled(false);
+        updateButton.setText("Downloading...");
+
+        Thread updateThread = new Thread("perform-update") {
+            @Override
+            public void run() {
+                try {
+                    UpdateInstaller installer = new UpdateInstaller();
+                    Path installerPath = installer.download(info.getDownloadUrl(), info.getAssetName(), backgroundLogger());
+                    installer.launchElevatedSilent(installerPath, backgroundLogger());
+                    SwingUtilities.invokeLater(new Runnable() {
+                        @Override
+                        public void run() {
+                            JOptionPane.showMessageDialog(MainFrame.this,
+                                    "Update v" + info.getLatestVersion() + " is installing.\n"
+                                            + "Approve the Windows security prompt if you see one.\n\n"
+                                            + "This application will now close - the background service "
+                                            + "restarts automatically once the update finishes.",
+                                    "Updating", JOptionPane.INFORMATION_MESSAGE);
+                            shutdown();
+                        }
+                    });
+                } catch (final Exception e) {
+                    SwingUtilities.invokeLater(new Runnable() {
+                        @Override
+                        public void run() {
+                            log("Update failed: " + e.getMessage());
+                            JOptionPane.showMessageDialog(MainFrame.this,
+                                    "Could not download or launch the update: " + e.getMessage(),
+                                    "Update failed", JOptionPane.ERROR_MESSAGE);
+                            updateButton.setEnabled(true);
+                            updateButton.setText("Update Now");
+                        }
+                    });
+                }
+            }
+        };
+        updateThread.setDaemon(true);
+        updateThread.start();
     }
 
     private void setupTray() {

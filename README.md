@@ -85,6 +85,25 @@ their own Java runtime, register the agent as a Windows service (starts
 automatically on boot, runs `--headless`), and add a "Configure Printers"
 shortcut. See `packaging/windows/README.md`.
 
+### Self-updating
+
+When a build is packaged into a jar (i.e. not run from `target/classes`
+during development), the GUI checks this repository's [latest
+release](https://github.com/confluxperu/dot_matrix_print_agent/releases/latest)
+once on startup. If a newer version is published, a banner appears with
+an "Update Now" button; clicking it downloads the installer matching the
+running architecture, launches it elevated and silent (one Windows
+security prompt), and closes the app so Setup can replace its files -
+the installer stops and restarts the background service on its own. See
+`UpdateChecker`/`UpdateInstaller` in `com.dotmatrix.agent.update`.
+
+This relies on the repository being **public** - the check uses GitHub's
+plain REST API with no embedded credentials on purpose (an auth token
+baked into a distributed jar is trivially extracted by decompiling it).
+A build only ever detects versions *newer* than itself, so this has no
+effect on machines still running a pre-1.1.0 build - those need one
+manual reinstall to start seeing future updates automatically.
+
 Configuration (server port, whether it accepts connections from other
 computers, and the configured network printers) is stored in
 `~/.dotmatrix-print-agent/config.json` and survives restarts.
