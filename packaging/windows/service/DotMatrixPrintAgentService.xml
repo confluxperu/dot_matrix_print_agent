@@ -1,0 +1,26 @@
+<service>
+  <id>DotMatrixPrintAgent</id>
+  <name>Dot Matrix Print Agent</name>
+  <description>Local HTTP bridge that lets Odoo send raw text print jobs to a dot matrix / receipt printer on this computer (see https://github.com/confluxperu). Starts automatically at boot. Use the "Configure Printers" shortcut in the Start Menu to pick the default printer.</description>
+
+  <!-- %BASE% is the folder that contains this exe/xml pair, i.e. the
+       install root - keep the jre\ folder and the jar next to it. -->
+  <executable>%BASE%\jre\bin\javaw.exe</executable>
+  <arguments>-jar "%BASE%\dotmatrix-print-agent.jar" --headless</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>15 sec</stoptimeout>
+
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

@@ -78,6 +78,13 @@ background service on a print server / kiosk machine):
 java -jar dotmatrix-print-agent.jar --headless
 ```
 
+### Installing as a Windows service
+
+`packaging/windows/` builds x86 and x64 Windows installers that bundle
+their own Java runtime, register the agent as a Windows service (starts
+automatically on boot, runs `--headless`), and add a "Configure Printers"
+shortcut. See `packaging/windows/README.md`.
+
 Configuration (server port, whether it accepts connections from other
 computers, and the configured network printers) is stored in
 `~/.dotmatrix-print-agent/config.json` and survives restarts.

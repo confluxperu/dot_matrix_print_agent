@@ -38,6 +38,16 @@ public final class Main {
         if (headless) {
             System.out.println("Dot Matrix Print Agent running in headless mode.");
             System.out.println("Press Ctrl+C to stop.");
+            // Lets a service manager (e.g. WinSW on Windows) stop the process
+            // cleanly - releases the HTTP port immediately instead of relying
+            // on the OS to reclaim it after a hard kill.
+            Runtime.getRuntime().addShutdownHook(new Thread("shutdown") {
+                @Override
+                public void run() {
+                    System.out.println("Stopping Dot Matrix Print Agent...");
+                    server.stop();
+                }
+            });
             Thread.currentThread().join();
             return;
         }

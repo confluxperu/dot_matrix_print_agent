@@ -14,7 +14,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Persists {@link AppConfig} to {@code ~/.dotmatrix-print-agent/config.json}.
+ * Persists {@link AppConfig} to a shared config file.
+ *
+ * <p>On Windows this lives under {@code %ProgramData%\DotMatrixPrintAgent}
+ * rather than the invoking user's home directory. That matters once the
+ * agent is installed as a Windows service: the service normally runs under
+ * the Local System account, whose {@code user.home} resolves to a
+ * completely different profile than the interactive user who configured
+ * the default printer through the GUI. {@code %ProgramData%} is the same
+ * physical location for both, so a printer picked in the GUI is the one
+ * the background service actually uses (the installer grants the "Users"
+ * group write access to this folder so the interactive GUI does not need
+ * to run elevated). Non-Windows platforms keep the original per-user
+ * location, used only for local development/testing of the agent.
  */
 public class ConfigStore {
 
@@ -22,8 +34,19 @@ public class ConfigStore {
     private final Path configFile;
 
     public ConfigStore() {
-        this.configDir = Paths.get(System.getProperty("user.home"), ".dotmatrix-print-agent");
+        this.configDir = resolveConfigDir();
         this.configFile = configDir.resolve("config.json");
+    }
+
+    private static Path resolveConfigDir() {
+        String osName = System.getProperty("os.name", "");
+        if (osName.toLowerCase(java.util.Locale.ROOT).contains("windows")) {
+            String programData = System.getenv("ProgramData");
+            if (programData != null && !programData.trim().isEmpty()) {
+                return Paths.get(programData, "DotMatrixPrintAgent");
+            }
+        }
+        return Paths.get(System.getProperty("user.home"), ".dotmatrix-print-agent");
     }
 
     @SuppressWarnings("unchecked")
