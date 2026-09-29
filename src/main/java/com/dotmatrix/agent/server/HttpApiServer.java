@@ -117,7 +117,23 @@ public class HttpApiServer {
         return new String(bos.toByteArray(), StandardCharsets.UTF_8);
     }
 
-    private static Map<String, Object> errorPayload(String message) {
+    /**
+     * How many agents this job was already forwarded through (0 when it
+     * comes straight from Odoo/a browser, which never sends the header).
+     */
+    private static int readHops(HttpExchange exchange) {
+        String value = exchange.getRequestHeaders().getFirst(PrintManager.HOPS_HEADER);
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+        private static Map<String, Object> errorPayload(String message) {
         Map<String, Object> map = new LinkedHashMap<String, Object>();
         map.put("success", false);
         map.put("error", message);
@@ -201,7 +217,7 @@ public class HttpApiServer {
             String encoding = encodingObj instanceof String ? (String) encodingObj : null;
 
             try {
-                printManager.printRaw(printer, content, encoding);
+                printManager.printRaw(printer, content, encoding, readHops(exchange));
                 log("Printed " + content.length() + " chars to '"
                         + (printer != null ? printer : "(default printer)") + "'");
                 Map<String, Object> ok = new LinkedHashMap<String, Object>();

@@ -23,12 +23,16 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 
 /**
- * Add/Edit form for a network (IP + port) printer.
+ * Add/Edit form for a network target: a printer reached by IP + port, or
+ * another Print Agent on the LAN that owns the printer.
  */
 public class NetworkPrinterDialog extends JDialog {
 
     private static final String[] ENCODINGS = {"ISO-8859-1", "UTF-8", "US-ASCII", "CP437", "Cp850"};
+    private static final String TYPE_RAW_LABEL = "Network printer (raw TCP, usually port 9100)";
+    private static final String TYPE_AGENT_LABEL = "Another Print Agent on the network (usually port 8787)";
 
+    private final JComboBox<String> typeCombo = new JComboBox<String>(new String[]{TYPE_RAW_LABEL, TYPE_AGENT_LABEL});
     private final JTextField nameField = new JTextField(20);
     private final JTextField hostField = new JTextField(20);
     private final JSpinner portSpinner = new JSpinner(new SpinnerNumberModel(9100, 1, 65535, 1));
@@ -40,6 +44,7 @@ public class NetworkPrinterDialog extends JDialog {
                 ModalityType.APPLICATION_MODAL);
 
         if (existing != null) {
+            typeCombo.setSelectedItem(existing.isAgent() ? TYPE_AGENT_LABEL : TYPE_RAW_LABEL);
             nameField.setText(existing.getName());
             hostField.setText(existing.getHost());
             portSpinner.setValue(existing.getPort() > 0 ? existing.getPort() : 9100);
@@ -52,10 +57,19 @@ public class NetworkPrinterDialog extends JDialog {
         c.insets = new Insets(4, 4, 4, 4);
         c.fill = GridBagConstraints.HORIZONTAL;
 
-        addRow(form, c, 0, "Name:", nameField);
-        addRow(form, c, 1, "Host / IP:", hostField);
-        addRow(form, c, 2, "Port:", portSpinner);
-        addRow(form, c, 3, "Encoding:", encodingCombo);
+        addRow(form, c, 0, "Type:", typeCombo);
+        addRow(form, c, 1, "Name:", nameField);
+        addRow(form, c, 2, "Host / IP:", hostField);
+        addRow(form, c, 3, "Port:", portSpinner);
+        addRow(form, c, 4, "Encoding:", encodingCombo);
+
+        typeCombo.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                onTypeChanged();
+            }
+        });
+        encodingCombo.setEnabled(!isAgentSelected());
 
         JButton okButton = new JButton("OK");
         JButton cancelButton = new JButton("Cancel");
@@ -82,6 +96,24 @@ public class NetworkPrinterDialog extends JDialog {
         pack();
         setLocationRelativeTo(owner);
         setResizable(false);
+    }
+
+    private boolean isAgentSelected() {
+        return TYPE_AGENT_LABEL.equals(typeCombo.getSelectedItem());
+    }
+
+    private void onTypeChanged() {
+        boolean agent = isAgentSelected();
+        // Swap the port only while it still holds the other type's default,
+        // so a custom port the user typed is never overwritten.
+        int port = (Integer) portSpinner.getValue();
+        if (agent && port == NetworkPrinter.DEFAULT_RAW_PORT) {
+            portSpinner.setValue(NetworkPrinter.DEFAULT_AGENT_PORT);
+        } else if (!agent && port == NetworkPrinter.DEFAULT_AGENT_PORT) {
+            portSpinner.setValue(NetworkPrinter.DEFAULT_RAW_PORT);
+        }
+        // A remote agent encodes the text itself, with its own printer's encoding.
+        encodingCombo.setEnabled(!agent);
     }
 
     private void onOk() {
@@ -114,6 +146,7 @@ public class NetworkPrinterDialog extends JDialog {
      */
     public NetworkPrinter apply(NetworkPrinter existing) {
         NetworkPrinter np = existing != null ? existing : new NetworkPrinter();
+        np.setType(isAgentSelected() ? NetworkPrinter.Type.AGENT : NetworkPrinter.Type.RAW);
         np.setName(nameField.getText().trim());
         np.setHost(hostField.getText().trim());
         np.setPort((Integer) portSpinner.getValue());

@@ -88,6 +88,15 @@ public class ConfigStore {
                     if (pm.get("name") != null) {
                         np.setName(String.valueOf(pm.get("name")));
                     }
+                    if (pm.get("type") != null) {
+                        // Configs written before remote agents existed have no
+                        // "type": they are all raw socket printers (the default).
+                        try {
+                            np.setType(NetworkPrinter.Type.valueOf(String.valueOf(pm.get("type"))));
+                        } catch (IllegalArgumentException ignored) {
+                            np.setType(NetworkPrinter.Type.RAW);
+                        }
+                    }
                     if (pm.get("host") != null) {
                         np.setHost(String.valueOf(pm.get("host")));
                     }
@@ -120,6 +129,7 @@ public class ConfigStore {
                 Map<String, Object> pm = new LinkedHashMap<String, Object>();
                 pm.put("id", np.getId());
                 pm.put("name", np.getName());
+                pm.put("type", np.getType().name());
                 pm.put("host", np.getHost());
                 pm.put("port", np.getPort());
                 pm.put("encoding", np.getEncoding());

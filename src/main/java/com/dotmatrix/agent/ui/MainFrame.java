@@ -68,7 +68,7 @@ public class MainFrame extends JFrame {
     private List<PrinterInfo> localPrinterInfos = java.util.Collections.emptyList();
 
     private final DefaultTableModel networkTableModel = new DefaultTableModel(
-            new Object[]{"Default", "Name", "Host", "Port", "Encoding"}, 0) {
+            new Object[]{"Default", "Name", "Type", "Host", "Port", "Encoding"}, 0) {
         @Override
         public boolean isCellEditable(int row, int column) {
             return false;
@@ -311,7 +311,9 @@ public class MainFrame extends JFrame {
                 + "  GET http://<this-computer-ip>:" + config.getServerPort() + "/printers\n\n"
                 + "By default the server only listens on 127.0.0.1, so it can only be\n"
                 + "reached from this same computer. Enable the checkbox above only if\n"
-                + "another computer on the network needs to submit print jobs here.");
+                + "another computer on the network needs to submit print jobs here -\n"
+                + "e.g. when this PC has the printer attached by USB and the other PCs\n"
+                + "of the store add it as a \"Print Agent\" in their Network Printers tab.");
         help.setEditable(false);
         help.setOpaque(false);
         panel.add(help);
@@ -344,7 +346,8 @@ public class MainFrame extends JFrame {
         for (NetworkPrinter np : config.getNetworkPrinters()) {
             boolean isDefault = (PrintManager.NETWORK_PREFIX + np.getId()).equals(defaultId);
             networkTableModel.addRow(new Object[]{
-                    isDefault ? "✓" : "", np.getName(), np.getHost(), np.getPort(), np.getEncoding()
+                    isDefault ? "✓" : "", np.getName(), np.isAgent() ? "Print Agent" : "Printer",
+                    np.getHost(), np.getPort(), np.isAgent() ? "(remote agent's)" : np.getEncoding()
             });
         }
     }

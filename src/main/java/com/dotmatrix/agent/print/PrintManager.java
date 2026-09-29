@@ -2,6 +2,7 @@ package com.dotmatrix.agent.print;
 
 import com.dotmatrix.agent.Logger;
 import com.dotmatrix.agent.config.AppConfig;
+import com.dotmatrix.agent.json.Json;
 import com.dotmatrix.agent.model.NetworkPrinter;
 
 import javax.print.Doc;
@@ -15,13 +16,19 @@ import javax.print.attribute.HashPrintRequestAttributeSet;
 import javax.print.attribute.PrintRequestAttributeSet;
 import javax.print.event.PrintJobAdapter;
 import javax.print.event.PrintJobEvent;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.URL;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -38,6 +45,15 @@ public class PrintManager {
     public static final String NETWORK_PREFIX = "network:";
     private static final String DEFAULT_ENCODING = "ISO-8859-1";
     private static final int SOCKET_CONNECT_TIMEOUT_MS = 5000;
+    private static final int AGENT_READ_TIMEOUT_MS = 30000;
+
+    /**
+     * Request header carrying how many agents a job has already been
+     * forwarded through. Guards against a misconfiguration where two
+     * agents have each other as default and would bounce a job forever.
+     */
+    public static final String HOPS_HEADER = "X-Print-Agent-Hops";
+    public static final int MAX_HOPS = 3;
 
     /**
      * Name fragments (case-insensitive) of printers that only render a
@@ -76,7 +92,9 @@ public class PrintManager {
         }
         for (NetworkPrinter np : config.getNetworkPrinters()) {
             String id = NETWORK_PREFIX + np.getId();
-            String detail = np.getHost() + ":" + np.getPort() + " (" + np.getEncoding() + ")";
+            String detail = np.isAgent()
+                    ? "Print Agent at " + agentBaseUrl(np)
+                    : np.getHost() + ":" + np.getPort() + " (" + np.getEncoding() + ")";
             result.add(new PrinterInfo(id, np.getName(), PrinterInfo.Type.NETWORK, detail, id.equals(defaultId)));
         }
         return result;
@@ -100,6 +118,15 @@ public class PrintManager {
      * default printer configured in the agent.
      */
     public void printRaw(String printerId, String content, String encodingOverride) throws PrintAgentException {
+        printRaw(printerId, content, encodingOverride, 0);
+    }
+
+    /**
+     * Same as {@link #printRaw(String, String, String)}, for a job that has
+     * already been forwarded by {@code hops} other agents.
+     */
+    public void printRaw(String printerId, String content, String encodingOverride, int hops)
+            throws PrintAgentException {
         String resolvedId = (printerId == null || printerId.trim().isEmpty())
                 ? config.getDefaultPrinterId()
                 : printerId;
@@ -124,7 +151,7 @@ public class PrintManager {
             if (np == null) {
                 throw new PrintAgentException("Unknown network printer id: " + id);
             }
-            printToNetwork(np, content, encodingOverride);
+            sendToNetworkTarget(np, content, encodingOverride, hops);
             return;
         }
 
@@ -137,13 +164,17 @@ public class PrintManager {
         }
         NetworkPrinter np = findNetworkPrinterByName(resolvedId);
         if (np != null) {
-            printToNetwork(np, content, encodingOverride);
+            sendToNetworkTarget(np, content, encodingOverride, hops);
             return;
         }
         throw new PrintAgentException("Printer not found: " + resolvedId);
     }
 
     public void testConnection(NetworkPrinter np) throws PrintAgentException {
+        if (np.isAgent()) {
+            testAgentConnection(np);
+            return;
+        }
         Socket socket = null;
         try {
             socket = new Socket();
@@ -279,6 +310,137 @@ public class PrintManager {
         } catch (Exception e) {
             throw new PrintAgentException("Failed to print to local printer '" + service.getName()
                     + "': " + e.getMessage(), e);
+        }
+    }
+
+    private void sendToNetworkTarget(NetworkPrinter np, String content, String encodingOverride, int hops)
+            throws PrintAgentException {
+        if (np.isAgent()) {
+            forwardToAgent(np, content, encodingOverride, hops);
+        } else {
+            printToNetwork(np, content, encodingOverride);
+        }
+    }
+
+    private static String agentBaseUrl(NetworkPrinter np) {
+        return "http://" + np.getHost() + ":" + np.getPort();
+    }
+
+    /**
+     * Forwards the job to another agent's {@code POST /print} without a
+     * 'printer' field, so it lands on whichever printer that agent has as
+     * default. The content goes as text (UTF-8 JSON) and is only turned into
+     * bytes by the agent that owns the printer, using that printer's
+     * encoding - unless the caller explicitly asked for one.
+     */
+    private void forwardToAgent(NetworkPrinter np, String content, String encodingOverride, int hops)
+            throws PrintAgentException {
+        if (hops >= MAX_HOPS) {
+            throw new PrintAgentException("Print job was forwarded through " + hops
+                    + " agents without reaching a printer. Check that the agents' default printers "
+                    + "do not point back at each other.");
+        }
+        String url = agentBaseUrl(np) + "/print";
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("content", content);
+        if (encodingOverride != null) {
+            payload.put("encoding", encodingOverride);
+        }
+        byte[] body = Json.stringify(payload).getBytes(StandardCharsets.UTF_8);
+
+        HttpURLConnection conn = null;
+        try {
+            conn = openAgentConnection(url);
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            conn.setRequestProperty(HOPS_HEADER, String.valueOf(hops + 1));
+            conn.setFixedLengthStreamingMode(body.length);
+            OutputStream out = conn.getOutputStream();
+            try {
+                out.write(body);
+            } finally {
+                out.close();
+            }
+            int status = conn.getResponseCode();
+            if (status >= 400) {
+                throw new PrintAgentException("Print Agent '" + np.getName() + "' (" + agentBaseUrl(np)
+                        + ") could not print: " + readAgentError(conn, status));
+            }
+            log("Forwarded job to Print Agent '" + np.getName() + "' (" + agentBaseUrl(np) + ").");
+        } catch (IOException e) {
+            throw new PrintAgentException("Could not reach Print Agent '" + np.getName() + "' ("
+                    + agentBaseUrl(np) + "): " + e.getMessage()
+                    + ". Check that the other computer is on, its agent is running with "
+                    + "'Accept connections from other computers' enabled, and its firewall allows port "
+                    + np.getPort() + ".", e);
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    private void testAgentConnection(NetworkPrinter np) throws PrintAgentException {
+        HttpURLConnection conn = null;
+        try {
+            conn = openAgentConnection(agentBaseUrl(np) + "/status");
+            int status = conn.getResponseCode();
+            String text = status < 400 ? readFully(conn.getInputStream()) : "";
+            Object parsed = null;
+            try {
+                parsed = Json.parse(text);
+            } catch (Exception ignored) {
+                // handled below: anything that is not our /status payload
+            }
+            if (status >= 400 || !(parsed instanceof Map)
+                    || !"dotmatrix-print-agent".equals(((Map<?, ?>) parsed).get("app"))) {
+                throw new PrintAgentException(agentBaseUrl(np)
+                        + " answered, but it does not look like a Dot Matrix Print Agent (HTTP " + status + ").");
+            }
+        } catch (IOException e) {
+            throw new PrintAgentException("Connection failed: " + e.getMessage(), e);
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    private static HttpURLConnection openAgentConnection(String url) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setConnectTimeout(SOCKET_CONNECT_TIMEOUT_MS);
+        conn.setReadTimeout(AGENT_READ_TIMEOUT_MS);
+        conn.setUseCaches(false);
+        return conn;
+    }
+
+    private static String readAgentError(HttpURLConnection conn, int status) {
+        try {
+            InputStream err = conn.getErrorStream();
+            if (err != null) {
+                Object parsed = Json.parse(readFully(err));
+                if (parsed instanceof Map && ((Map<?, ?>) parsed).get("error") != null) {
+                    return String.valueOf(((Map<?, ?>) parsed).get("error"));
+                }
+            }
+        } catch (Exception ignored) {
+            // fall through to the generic message
+        }
+        return "HTTP " + status;
+    }
+
+    private static String readFully(InputStream in) throws IOException {
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int n;
+            while ((n = in.read(buffer)) != -1) {
+                bos.write(buffer, 0, n);
+            }
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            in.close();
         }
     }
 

@@ -16,6 +16,10 @@ a client PC by itself, so this agent bridges that gap.
 - Lets you add, edit and remove **network printers** by IP/host + port
   (the classic raw/JetDirect protocol most network dot matrix, thermal
   and label printers speak, usually on port 9100).
+- Lets you add **another Print Agent** on the network as a target (Network
+  Printers tab → Add... → Type "Another Print Agent"), so a PC without a
+  printer forwards its jobs to the PC that has one — see "Several PCs
+  sharing one printer" below.
 - Lets you mark one printer (local or network) as the **default**. Once
   set, callers do not need to say which printer to use at all — see
   below.
@@ -46,6 +50,48 @@ this agent's own "Server" tab. They both default to
 `http://127.0.0.1:8787`, so as long as neither side has been changed
 there is nothing to keep in sync; if you change the port here, update
 the same value on the Odoo settings page (and vice versa).
+
+## Several PCs sharing one printer (e.g. one printer per store)
+
+A single Odoo database can serve several stores, each with its own
+printer on its own LAN, so the Odoo setting has to stay the same for
+everyone: leave it at `http://127.0.0.1:8787`. The browser then always
+talks to the agent on its own PC, and each agent decides where the job
+goes:
+
+```
+Store 1
+  PC with the printer (e.g. 192.168.0.26) - agent - local printer (USB)
+  Other PC ---- agent ---- forwards to http://192.168.0.26:8787 ---^
+```
+
+On the **PC that has the printer** attached:
+
+1. Local Printers → select it → **Set as Default** → Send Test Print.
+2. Server tab → enable **Accept connections from other computers** →
+   Apply.
+3. Allow the port through the Windows firewall (elevated prompt):
+   `netsh advfirewall firewall add rule name="Dot Matrix Print Agent" dir=in action=allow protocol=TCP localport=8787`
+4. Give the PC a fixed IP (static, or a DHCP reservation in the router).
+
+On **every other PC** of the same store:
+
+1. Network Printers → **Add...** → Type **Another Print Agent on the
+   network**, Host = the IP of the PC with the printer, Port = `8787`.
+2. **Test Connection** (checks that an agent answers there), then
+   **Set as Default** and **Send Test Print**.
+
+The forwarded job goes to whatever printer the receiving agent has as
+default and is encoded with *that* printer's encoding, so the encoding is
+not configured on the forwarding side. Chains are allowed (A → B → C) up
+to three hops; a loop (two agents defaulting to each other) is rejected
+with an error instead of bouncing forever. The PC with the printer must be
+on for the other PCs to print.
+
+This keeps each store self-contained (adding a store never touches Odoo or
+the other stores) and keeps the browser talking only to `127.0.0.1`,
+which avoids the mixed-content / private-network restrictions browsers
+apply when a page calls a LAN IP directly.
 
 ## Build
 
@@ -139,6 +185,18 @@ curl -X POST http://127.0.0.1:8787/print \
   `javax.print`. Depending on the OS print driver, some drivers may still
   reformat/paginate plain text; a network printer configured by IP/port
   is the more reliable, driver-independent option for true raw printing.
+
+### "Test Print says it was sent, but nothing comes out"
+
+For a local printer the agent only hands the job to the Windows print
+queue; it cannot tell whether the queue actually delivers it. If the queue
+shows the printer as *Offline* / *Use Printer Offline* is ticked
+(`wmic printer get Name,PortName,WorkOffline` shows `TRUE`), Windows keeps
+the job forever. For a USB printer this usually means the printer is not
+attached to *this* PC on that port anymore (Windows sets it offline by
+itself when the USB device is gone). If the printer is attached to another
+PC, install the agent there and add it here as "Another Print Agent" (see
+above).
 
 ### "It printed but the file/output is empty"
 
