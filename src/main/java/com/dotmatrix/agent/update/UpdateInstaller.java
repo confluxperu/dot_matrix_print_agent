@@ -16,7 +16,8 @@ import java.util.Arrays;
  * silent, so the caller can then exit and let Setup replace files this
  * process might otherwise be holding open (the jar, the bundled JRE's
  * DLLs). The installer itself (see packaging/windows/installer.iss)
- * stops the running service before touching those files.
+ * closes any copy still running before touching those files, and reopens
+ * the agent when it finishes.
  */
 public final class UpdateInstaller {
 

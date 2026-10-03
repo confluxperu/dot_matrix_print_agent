@@ -117,19 +117,24 @@ jar cfm dotmatrix-print-agent.jar MANIFEST.MF -C out .
 java -jar dotmatrix-print-agent.jar
 ```
 
-Add `--headless` to run without the window (useful for running it as a
-background service on a print server / kiosk machine):
+Add `--minimized` to start with the window hidden in the system tray
+(what the Windows installer uses at logon). If the agent is already
+running, launching it again brings the running copy's window to the
+front instead of starting a second one.
+
+Add `--headless` to run without any window or tray icon (e.g. on a Linux
+print server):
 
 ```bash
 java -jar dotmatrix-print-agent.jar --headless
 ```
 
-### Installing as a Windows service
+### Installing on Windows
 
 `packaging/windows/` builds x86 and x64 Windows installers that bundle
-their own Java runtime, register the agent as a Windows service (starts
-automatically on boot, runs `--headless`), and add a "Configure Printers"
-shortcut. See `packaging/windows/README.md`.
+their own Java runtime, start the agent in the system tray at every user
+logon, and add a desktop icon to open its window. See
+`packaging/windows/README.md`.
 
 ### Self-updating
 
@@ -140,7 +145,7 @@ once on startup. If a newer version is published, a banner appears with
 an "Update Now" button; clicking it downloads the installer matching the
 running architecture, launches it elevated and silent (one Windows
 security prompt), and closes the app so Setup can replace its files -
-the installer stops and restarts the background service on its own. See
+the installer closes any running copy and reopens the agent when done. See
 `UpdateChecker`/`UpdateInstaller` in `com.dotmatrix.agent.update`.
 
 This relies on the repository being **public** - the check uses GitHub's

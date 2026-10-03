@@ -3,19 +3,18 @@
 Builds a Windows installer that:
 
 - Bundles its own Java runtime (nothing to install separately).
-- Registers the agent as a **Windows service** ("Dot Matrix Print Agent"),
-  set to **start automatically on boot** - before any user logs in.
-- Runs the agent in `--headless` mode (no window), since Windows services
-  run in a non-interactive session and cannot show a GUI/tray icon.
-- Adds a **desktop icon** (and a matching "Configure Printers" Start Menu
-  shortcut) that opens the normal configuration window (Local/Network
-  Printers, default printer) and restarts the service afterwards so the
-  change takes effect. Without this, there would be no way to reach that
-  window at all - the service itself has no window (see below).
+- Starts the agent **at every user logon**, straight into the **system
+  tray** (machine-wide `Run` registry key, so it applies to every user of
+  the computer).
+- Adds a **desktop icon** and a Start Menu shortcut that open the
+  configuration window (Local/Network Printers, default printer, server
+  settings). If the agent is already running in the tray, the icon just
+  brings its window to the front.
+- Opens the agent right after installing (and again after a self-update).
 
 Two variants are produced: `DotMatrixPrintAgentSetup-x86.exe` (32-bit
 Windows) and `DotMatrixPrintAgentSetup-x64.exe` (64-bit Windows, the
-common case today).
+common case today). Both work on Windows 7, 8, 10 and 11.
 
 Both are also built automatically by
 `.github/workflows/release-windows-installer.yml` on a `windows-latest`
@@ -25,52 +24,41 @@ to a new GitHub Release; the workflow can also be run on demand
 workflow") to sanity-check the build without cutting a release. Building
 locally (below) is only needed if you don't want to use CI.
 
-## Why a headless service + a separate configuration window?
+## Why a tray app at logon instead of a Windows service?
 
-The agent has always had two modes (see `Main.java`): a GUI (system tray,
-"Local/Network Printers" tabs) and `--headless` (background only, no
-window - added for exactly this kind of deployment). A Windows service
-runs in **Session 0**, which cannot display windows to any logged-in
-user, so the service always runs `--headless`; the GUI is only ever
-launched on demand, as a normal foreground app, via the "Configure
-Printers" shortcut.
+Up to v1.2.x the agent was installed as a Windows service (through the
+WinSW wrapper). On some machines - typically slower ones, or with a heavy
+antivirus - the service was set to Automatic but was found stopped after
+a reboot and had to be started by hand: Windows gives a service 30
+seconds to report that it started during boot, and if it misses that
+window it is marked as failed without any retry (the restart-on-failure
+settings only apply to a service that crashes *after* starting).
 
-Both the service and the GUI read/write the **same** configuration file
-(`%ProgramData%\DotMatrixPrintAgent\config.json` - see the `ConfigStore`
-change below), but they are still two separate processes that cannot both
-hold the local HTTP port at the same time, and the service does not
-hot-reload the file while running. So "Configure Printers":
+Other print bridges used with Odoo on the same machines (e.g. jIotBox)
+never had this problem because they are plain desktop programs started
+when the user logs in. The agent now works the same way:
 
-1. stops the service,
-2. opens the GUI in the foreground and waits for you to close it,
-3. starts the service again, now with the printer you just picked.
+- No service, no wrapper, no 30-second limit - Windows simply launches
+  `jre\bin\javaw.exe -jar dotmatrix-print-agent.jar --minimized` at logon.
+- `--minimized` starts with the window hidden and the tray icon showing;
+  if the tray is not available, the window is shown instead.
+- Only one copy runs at a time: launching it again (desktop icon, Start
+  Menu) asks the running copy to show its window, and a second
+  `--minimized` launch just exits.
+- It runs as the logged-in user, so it also sees printers connected only
+  for that user (e.g. shared printers added from another PC), which a
+  service running as Local System could not.
 
-You do not need to remember to do this yourself - it is exactly what the
-desktop icon and Start Menu shortcut both run
-(`scripts\configure-printers.ps1`).
-
-## Code changes that made this possible
-
-- `ConfigStore` now resolves its config directory to
-  `%ProgramData%\DotMatrixPrintAgent` on Windows instead of the invoking
-  user's home folder. This matters specifically because the Windows
-  service runs under the **Local System** account, whose `user.home`
-  points to a system profile the interactive user never sees - without
-  this fix the service would silently look for a *different, empty*
-  config file and never find the printer you configured. The installer
-  grants the "Users" group write access to this folder so the GUI does
-  not need to run elevated just to save a config change.
-- `Main.java`'s headless path now registers a JVM shutdown hook that
-  calls `server.stop()`, so WinSW stopping the service releases the HTTP
-  port immediately and logs a clean shutdown line instead of relying on
-  the OS to reclaim the port after a hard kill.
-- Nothing else changed: `--headless` and the HTTP API were already there.
+The trade-off: the agent is available once a user has logged in, not
+before - the same as jIotBox. Closing the window keeps it running in the
+tray; only **Exit** in the tray menu stops it (until the next logon or
+until the icon is opened again).
 
 ## Prerequisites (on the Windows machine used to build the installer)
 
 - **Maven** (`mvn`) and a JDK on `PATH`, to build `dotmatrix-print-agent.jar`.
-- **Internet access** - the build script downloads a portable JRE and the
-  WinSW service wrapper (see "Third-party components" below).
+- **Internet access** - the build script downloads a portable JRE (see
+  "Third-party components" below).
 - **[Inno Setup 6](https://jrsoftware.org/isinfo.php)** (free), optional
   but recommended - without it you still get ready-to-use portable
   folders, just not a polished single `.exe` installer (see below).
@@ -80,7 +68,7 @@ agent will run - the installer bundles everything.
 
 ## Building
 
-From an elevated PowerShell, in this folder:
+From PowerShell, in this folder:
 
 ```powershell
 .\build-installer.ps1
@@ -95,18 +83,13 @@ This produces:
 
 - `dist\x86\` and `dist\x64\` - self-contained portable folders. If you
   don't have Inno Setup, zip one of these up, copy it to the target
-  machine, and from an elevated PowerShell run:
-
-  ```powershell
-  cd DotMatrixPrintAgent\scripts
-  .\install-service.ps1
-  ```
-
-  That registers and starts the service exactly like the `.exe`
-  installer's silent post-install step does.
+  machine and run `jre\bin\javaw.exe -jar dotmatrix-print-agent.jar`.
+  The portable copy does not start at logon by itself: put a shortcut
+  with `--minimized` in the user's Startup folder (`shell:startup`) for
+  that.
 
 Re-running `build-installer.ps1` is safe and fast on subsequent runs -
-downloaded JRE/WinSW files are cached (by SHA-256) under `.cache\`.
+downloaded JRE files are cached (by SHA-256) under `.cache\`.
 
 ### Which installer for which machine?
 
@@ -119,48 +102,55 @@ downloaded JRE/WinSW files are cached (by SHA-256) under `.cache\`.
 
 ## What the installer does
 
-1. Copies the jar, bundled JRE, WinSW (renamed
-   `DotMatrixPrintAgentService.exe`) and its config into
+1. Closes any copy of the agent that is running (in every user's
+   session), so its files can be replaced. When updating from v1.2.x it
+   first stops and removes the old Windows service and its files
+   (`DotMatrixPrintAgentService.exe/.xml`, service scripts, `logs\`,
+   old Start Menu shortcuts).
+2. Copies the jar and the bundled JRE into
    `%ProgramFiles%\DotMatrixPrintAgent` (or `%ProgramFiles(x86)%` for the
    x86 build).
-2. Runs `scripts\install-service.ps1`, which registers the Windows
-   service (`sc.exe`-level, via WinSW) with **Startup type: Automatic**
-   and starts it immediately.
-3. Adds a **Dot Matrix Print Agent** desktop icon (opens the same
-   configuration window as "Configure Printers" below), and Start Menu
-   shortcuts: **Configure Printers**, **Restart Service**, **View
-   Service Logs**, **Uninstall**.
+3. Adds `DotMatrixPrintAgent` to
+   `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`, so the agent
+   starts in the tray at every user's logon.
+4. Adds a Windows Firewall rule allowing the bundled `javaw.exe`, so a
+   standard user never gets the "allow access" prompt (which needs an
+   admin) when the agent is set to accept connections from other
+   computers. While it only listens on 127.0.0.1 (the default) the rule
+   has no effect.
+5. Adds a **Dot Matrix Print Agent** desktop icon and Start Menu
+   shortcut, plus **Uninstall**.
+6. Opens the agent.
 
-Uninstalling (Control Panel &rarr; Apps, or the Start Menu shortcut) stops
-and unregisters the service before removing files. It does **not** delete
+Uninstalling (Control Panel &rarr; Apps, or the Start Menu shortcut)
+closes the agent and removes the logon entry and the firewall rule before
+removing files. It does **not** delete
 `%ProgramData%\DotMatrixPrintAgent\config.json` (your printer setup
-survives an uninstall/reinstall/upgrade).
+survives an uninstall/reinstall/upgrade, including the upgrade from the
+service-based v1.2.x).
 
 ## After installing
 
-1. Open the **Dot Matrix Print Agent** icon on the desktop (or
-   **Configure Printers** from the Start Menu - same thing).
+1. The agent opens on its own (later, it starts in the tray at logon).
+   Otherwise open the **Dot Matrix Print Agent** icon on the desktop.
 2. Add your network printer (or pick a local one) and **Set as Default**
    - Odoo's print button never asks which printer to use, so this step
-     is required.
-3. Close the window - the service restarts automatically with the new
-   default.
+     is required. The change applies immediately.
+3. Close the window - the agent keeps running in the tray.
 4. In Odoo: Settings &rarr; General Settings &rarr; "Dot Matrix Print
    Agent" should already point to `http://127.0.0.1:8787`, matching this
    agent's default port.
 
 ## Troubleshooting
 
-- **Service status / logs**: `services.msc` &rarr; "Dot Matrix Print
-  Agent", or the **View Service Logs** shortcut
-  (`%ProgramFiles%\DotMatrixPrintAgent\logs`, rotated by WinSW).
-- **Manually control the service** (elevated PowerShell, from the install
-  folder): `.\DotMatrixPrintAgentService.exe status|start|stop|restart`.
-- **"Port already in use" opening Configure Printers manually** (e.g. by
-  double-clicking the jar instead of using the shortcut): the service is
-  still holding port 8787. Use the **Configure Printers** shortcut, which
-  stops the service first, or run `.\DotMatrixPrintAgentService.exe stop`
-  yourself first.
+- **Is it running?** Look for the "P" icon in the tray (it may be inside
+  the "^" overflow area), or open `http://127.0.0.1:8787/status`.
+- **It did not start at logon**: check Task Manager &rarr; Startup (Windows
+  8 and later) - "DotMatrixPrintAgent" must be *Enabled*. On Windows 7,
+  run `msconfig` &rarr; Startup.
+- **"Port already in use" in the window**: some other program is using
+  port 8787. Pick another port in the Server tab and update the URL in
+  Odoo to match.
 
 ## Third-party components bundled by the build script
 
@@ -175,12 +165,7 @@ repository:
   Adoptium/Temurin and Azul Zulu have both discontinued Windows x86
   entirely. The x64 build from the same vendor is used for consistency
   between both installer variants.
-- **[WinSW](https://github.com/winsw/winsw)** v2.12.0 (MIT) - a small,
-  well-established wrapper that runs an arbitrary executable as a Windows
-  service; used here to run `javaw -jar dotmatrix-print-agent.jar
-  --headless` as "Dot Matrix Print Agent", with auto-restart on failure
-  and rolling log files.
 
-To update either pin, replace both the URL and the SHA-256 constant in
+To update the pin, replace both the URL and the SHA-256 constant in
 `build-installer.ps1` - the script refuses to proceed on a checksum
 mismatch.

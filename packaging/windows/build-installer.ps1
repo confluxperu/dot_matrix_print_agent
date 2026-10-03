@@ -3,12 +3,11 @@
     Builds Windows x86 and x64 installers for the Dot Matrix Print Agent.
 .DESCRIPTION
     1. Builds the (architecture-independent) jar with Maven.
-    2. Downloads a portable JRE 8 and WinSW (pinned versions, verified by
-       SHA-256) for both x86 and x64, and stages a self-contained
-       "dist\<arch>" folder for each - jar + JRE + WinSW service wrapper
-       + management scripts. Each staged folder is a ready-to-use portable
-       install on its own: run "scripts\install-service.ps1" from an
-       elevated PowerShell.
+    2. Downloads a portable JRE 8 (pinned version, verified by SHA-256)
+       for both x86 and x64, and stages a self-contained "dist\<arch>"
+       folder for each - jar + JRE + scripts. Each staged folder is a
+       ready-to-use portable copy on its own: run
+       "jre\bin\javaw.exe -jar dotmatrix-print-agent.jar".
     3. If Inno Setup's compiler (ISCC.exe) is available, also compiles a
        polished installer for each architecture into ".\output".
 .NOTES
@@ -33,10 +32,6 @@ $JreX64Url = 'https://github.com/bell-sw/Liberica/releases/download/8u504%2B1/be
 $JreX64Sha256 = '429B3E79A68A326315306F854172933FD671698DA64A1CEC41D97A45324614D5'
 $JreX86Url = 'https://github.com/bell-sw/Liberica/releases/download/8u504%2B1/bellsoft-jre8u504%2B1-windows-i586.zip'
 $JreX86Sha256 = '0A3245B45CBDD42CCE258C38CA21222D4E446A2443B0C4F9915BA704AC879D11'
-$WinSwX64Url = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
-$WinSwX64Sha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
-$WinSwX86Url = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x86.exe'
-$WinSwX86Sha256 = '0C21327463A43A61F2EFB227EC4AFD2467FDE91618CC725148C1099001CA91AE'
 
 # --- Paths ----------------------------------------------------------------
 $windowsDir = Split-Path -Parent $MyInvocation.MyCommand.Path      # packaging\windows
@@ -82,14 +77,13 @@ function Expand-JreZip {
 }
 
 function New-StagedDist {
-    param([string]$Arch, [string]$JreZip, [string]$JreSha256, [string]$WinSwExe, [string]$WinSwSha256)
+    param([string]$Arch, [string]$JreZip, [string]$JreSha256)
 
     Write-Host ""
     Write-Host "== Staging dist\$Arch ==" -ForegroundColor Cyan
     $archDist = Join-Path $distDir $Arch
     if (Test-Path $archDist) { Remove-Item $archDist -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $archDist | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $archDist 'logs') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $archDist 'scripts') | Out-Null
 
     Write-Host "Fetching JRE ($Arch)..."
@@ -97,11 +91,6 @@ function New-StagedDist {
     Write-Host "Extracting JRE..."
     Expand-JreZip -ZipPath $jreZipPath -TargetJreDir (Join-Path $archDist 'jre')
 
-    Write-Host "Fetching WinSW ($Arch)..."
-    $winswPath = Get-CachedFile -Url $WinSwExe -Sha256 $WinSwSha256 -FileName "WinSW-$Arch.exe"
-    Copy-Item $winswPath (Join-Path $archDist 'DotMatrixPrintAgentService.exe')
-
-    Copy-Item (Join-Path $windowsDir 'service\DotMatrixPrintAgentService.xml') $archDist
     Copy-Item (Join-Path $windowsDir 'scripts\*.ps1') (Join-Path $archDist 'scripts')
 
     $jarPath = Join-Path $repoRoot 'target\dotmatrix-print-agent.jar'
@@ -125,10 +114,8 @@ if (-not (Test-Path (Join-Path $repoRoot 'target\dotmatrix-print-agent.jar'))) {
 }
 
 # --- 2. Stage both architectures ---------------------------------------
-$distX86 = New-StagedDist -Arch 'x86' -JreZip $JreX86Url -JreSha256 $JreX86Sha256 `
-    -WinSwExe $WinSwX86Url -WinSwSha256 $WinSwX86Sha256
-$distX64 = New-StagedDist -Arch 'x64' -JreZip $JreX64Url -JreSha256 $JreX64Sha256 `
-    -WinSwExe $WinSwX64Url -WinSwSha256 $WinSwX64Sha256
+$distX86 = New-StagedDist -Arch 'x86' -JreZip $JreX86Url -JreSha256 $JreX86Sha256
+$distX64 = New-StagedDist -Arch 'x64' -JreZip $JreX64Url -JreSha256 $JreX64Sha256
 
 # --- 3. Compile installers with Inno Setup, if available ----------------
 if ($SkipInnoSetup) {

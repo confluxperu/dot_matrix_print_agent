@@ -17,16 +17,14 @@ import java.util.Map;
  * Persists {@link AppConfig} to a shared config file.
  *
  * <p>On Windows this lives under {@code %ProgramData%\DotMatrixPrintAgent}
- * rather than the invoking user's home directory. That matters once the
- * agent is installed as a Windows service: the service normally runs under
- * the Local System account, whose {@code user.home} resolves to a
- * completely different profile than the interactive user who configured
- * the default printer through the GUI. {@code %ProgramData%} is the same
- * physical location for both, so a printer picked in the GUI is the one
- * the background service actually uses (the installer grants the "Users"
- * group write access to this folder so the interactive GUI does not need
- * to run elevated). Non-Windows platforms keep the original per-user
- * location, used only for local development/testing of the agent.
+ * rather than the invoking user's home directory, so every user who logs
+ * in on the computer (the installer starts the agent at each logon) shares
+ * the same printer setup - and installs that ran it as a Windows service
+ * under Local System up to v1.2.x keep theirs after upgrading. The
+ * installer grants the "Users" group write access to this folder, so the
+ * agent does not need to run elevated. Non-Windows platforms keep the
+ * original per-user location, used only for local development/testing of
+ * the agent.
  */
 public class ConfigStore {
 

@@ -35,11 +35,22 @@ public class HttpApiServer {
     private final Logger logger;
     private HttpServer server;
     private ExecutorService executor;
+    private volatile Runnable showWindowAction;
 
     public HttpApiServer(AppConfig config, PrintManager printManager, Logger logger) {
         this.config = config;
         this.printManager = printManager;
         this.logger = logger;
+    }
+
+    /**
+     * What {@code /ui/show} runs - set by the GUI so that launching the
+     * agent a second time (desktop icon, Start Menu) brings the window of
+     * the copy already running in the tray to the front instead of failing
+     * on the busy port. Left unset in headless mode.
+     */
+    public void setShowWindowAction(Runnable showWindowAction) {
+        this.showWindowAction = showWindowAction;
     }
 
     public synchronized void start() throws IOException {
@@ -51,6 +62,7 @@ public class HttpApiServer {
         server.createContext("/status", new StatusHandler());
         server.createContext("/printers", new PrintersHandler());
         server.createContext("/print", new PrintHandler());
+        server.createContext("/ui/show", new ShowWindowHandler());
         executor = Executors.newCachedThreadPool();
         server.setExecutor(executor);
         server.start();
@@ -151,6 +163,23 @@ public class HttpApiServer {
             payload.put("app", "dotmatrix-print-agent");
             payload.put("version", "1.0.0");
             sendJson(exchange, 200, payload);
+        }
+    }
+
+    private final class ShowWindowHandler implements com.sun.net.httpserver.HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            // Only another copy of the agent on this same computer may ask
+            // for the window, even when listening on all interfaces.
+            Runnable action = showWindowAction;
+            if (action == null || !exchange.getRemoteAddress().getAddress().isLoopbackAddress()) {
+                sendJson(exchange, 404, errorPayload("Not found"));
+                return;
+            }
+            action.run();
+            Map<String, Object> ok = new LinkedHashMap<String, Object>();
+            ok.put("success", true);
+            sendJson(exchange, 200, ok);
         }
     }
 

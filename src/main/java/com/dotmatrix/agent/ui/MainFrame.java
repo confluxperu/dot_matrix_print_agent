@@ -615,8 +615,7 @@ public class MainFrame extends JFrame {
      * Downloads the installer matching this JVM's architecture and
      * launches it elevated and silent (one Windows security prompt), then
      * closes this application so Setup can freely replace the jar/JRE
-     * files. The installer stops and restarts the background service on
-     * its own.
+     * files. The installer reopens the agent once it finishes.
      */
     private void performUpdate() {
         if (pendingUpdate == null) {
@@ -639,8 +638,8 @@ public class MainFrame extends JFrame {
                             JOptionPane.showMessageDialog(MainFrame.this,
                                     "Update v" + info.getLatestVersion() + " is installing.\n"
                                             + "Approve the Windows security prompt if you see one.\n\n"
-                                            + "This application will now close - the background service "
-                                            + "restarts automatically once the update finishes.",
+                                            + "This application will now close - it reopens "
+                                            + "automatically once the update finishes.",
                                     "Updating", JOptionPane.INFORMATION_MESSAGE);
                             shutdown();
                         }
@@ -674,6 +673,24 @@ public class MainFrame extends JFrame {
         } catch (Exception e) {
             log("Could not set up system tray icon: " + e.getMessage());
         }
+    }
+
+    /** True when closing the window leaves the agent running in the tray. */
+    public boolean hasTray() {
+        return trayManager != null && trayManager.isAvailable();
+    }
+
+    /** Shows and focuses the window; safe to call from any thread. */
+    public void showWindow() {
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                setVisible(true);
+                setExtendedState(java.awt.Frame.NORMAL);
+                toFront();
+                requestFocus();
+            }
+        });
     }
 
     public void log(final String message) {

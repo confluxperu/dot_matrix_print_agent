@@ -2,7 +2,6 @@ package com.dotmatrix.agent.ui;
 
 import java.awt.AWTException;
 import java.awt.Color;
-import java.awt.Frame;
 import java.awt.Graphics2D;
 import java.awt.MenuItem;
 import java.awt.PopupMenu;
@@ -73,9 +72,7 @@ public class TrayManager {
     }
 
     private void showFrame() {
-        frame.setVisible(true);
-        frame.setExtendedState(Frame.NORMAL);
-        frame.toFront();
+        frame.showWindow();
     }
 
     public void uninstall() {
